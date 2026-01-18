@@ -430,74 +430,76 @@ def save_human_point_clouds(complete_scene_point_clouds, scene_only_point_clouds
             frame_points_world = np.dot(
                 frame_points, R_cam_to_world.T) + t_cam_to_world  # [H, W, 3]
 
-            # Single human processing
+            # Process multiple humans
             target_h, target_w = frame_points.shape[0], frame_points.shape[1]
-            combined_human_mask = np.zeros((target_h, target_w), dtype=bool)
+            num_humans = human_masks.shape[0]
 
-            human_idx = 0
-            if frame_idx < human_masks.shape[1]:
-                # [H_orig, W_orig]
-                human_mask = human_masks[human_idx,
-                                         frame_idx].cpu().numpy()
+            for human_idx in range(num_humans):
+                if frame_idx < human_masks.shape[1]:
+                    # [H_orig, W_orig]
+                    human_mask = human_masks[human_idx,
+                                             frame_idx].cpu().numpy()
 
-                # Resize human mask to match point_map dimensions
-                if human_mask.shape != (target_h, target_w):
-                    # Resize mask using nearest neighbor to preserve binary values
-                    human_mask_resized = cv2.resize(human_mask.astype(np.uint8),
-                                                    (target_w, target_h),
-                                                    interpolation=cv2.INTER_NEAREST).astype(bool)
-                else:
-                    human_mask_resized = human_mask
-
-                combined_human_mask = human_mask_resized
-
-            # Apply confidence threshold and human mask
-            valid_mask = (frame_conf > 0.05) & combined_human_mask
-
-            if np.any(valid_mask):
-                # Get valid human points in world coordinates
-                # [N, 3] - World coordinates
-                valid_points_world = frame_points_world[valid_mask]
-
-                # Filter out zero points (in original camera coordinates)
-                # [N, 3] - Camera coordinates for zero check
-                valid_points_cam = frame_points[valid_mask]
-                non_zero_mask = np.any(valid_points_cam != 0, axis=1)
-                if np.any(non_zero_mask):
-                    # [N, 3] - World coordinates
-                    human_points_world = valid_points_world[non_zero_mask]
-
-                    # Get colors from RGB image if available
-                    if rgb_images is not None and frame_idx < rgb_images.shape[0]:
-                        rgb_image = rgb_images[frame_idx].permute(
-                            1, 2, 0).numpy()  # [H, W, 3], values in [0, 1]
-
-                        # Get 2D coordinates of valid human points
-                        valid_coords_2d = np.where(valid_mask)
-                        y_coords, x_coords = valid_coords_2d
-
-                        # Apply non-zero mask to get final coordinates
-                        y_coords_final = y_coords[non_zero_mask]
-                        x_coords_final = x_coords[non_zero_mask]
-
-                        # Extract colors from RGB image
-                        # [N, 3], values in [0, 1]
-                        human_colors = rgb_image[y_coords_final,
-                                                 x_coords_final]
+                    # Resize human mask to match point_map dimensions
+                    if human_mask.shape != (target_h, target_w):
+                        # Resize mask using nearest neighbor to preserve binary values
+                        human_mask_resized = cv2.resize(human_mask.astype(np.uint8),
+                                                        (target_w, target_h),
+                                                        interpolation=cv2.INTER_NEAREST).astype(bool)
                     else:
-                        # Fallback to red color if RGB not available
-                        human_colors = np.tile(
-                            [0.8, 0.2, 0.2], (len(human_points_world), 1))
+                        human_mask_resized = human_mask
 
-                    human_pcd.points = o3d.utility.Vector3dVector(
-                        human_points_world)
-                    human_pcd.colors = o3d.utility.Vector3dVector(human_colors)
+                    combined_human_mask = human_mask_resized
 
-            # Save human point cloud
-            if len(human_pcd.points) > 0:
-                ply_path = os.path.join(
-                    human_only_dir, f"human_frame_{frame_idx:04d}.ply")
-                o3d.io.write_point_cloud(ply_path, human_pcd)
+                    # Apply confidence threshold and human mask
+                    valid_mask = (frame_conf > 0.05) & combined_human_mask
+
+                    human_pcd = o3d.geometry.PointCloud()
+
+                    if np.any(valid_mask):
+                        # Get valid human points in world coordinates
+                        # [N, 3] - World coordinates
+                        valid_points_world = frame_points_world[valid_mask]
+
+                        # Filter out zero points (in original camera coordinates)
+                        # [N, 3] - Camera coordinates for zero check
+                        valid_points_cam = frame_points[valid_mask]
+                        non_zero_mask = np.any(valid_points_cam != 0, axis=1)
+                        if np.any(non_zero_mask):
+                            # [N, 3] - World coordinates
+                            human_points_world = valid_points_world[non_zero_mask]
+
+                            # Get colors from RGB image if available
+                            if rgb_images is not None and frame_idx < rgb_images.shape[0]:
+                                rgb_image = rgb_images[frame_idx].permute(
+                                    1, 2, 0).numpy()  # [H, W, 3], values in [0, 1]
+
+                                # Get 2D coordinates of valid human points
+                                valid_coords_2d = np.where(valid_mask)
+                                y_coords, x_coords = valid_coords_2d
+
+                                # Apply non-zero mask to get final coordinates
+                                y_coords_final = y_coords[non_zero_mask]
+                                x_coords_final = x_coords[non_zero_mask]
+
+                                # Extract colors from RGB image
+                                # [N, 3], values in [0, 1]
+                                human_colors = rgb_image[y_coords_final,
+                                                         x_coords_final]
+                            else:
+                                # Fallback to red color if RGB not available
+                                human_colors = np.tile(
+                                    [0.8, 0.2, 0.2], (len(human_points_world), 1))
+
+                            human_pcd.points = o3d.utility.Vector3dVector(
+                                human_points_world)
+                            human_pcd.colors = o3d.utility.Vector3dVector(human_colors)
+
+                    # Save human point cloud
+                    if len(human_pcd.points) > 0:
+                        ply_path = os.path.join(
+                            human_only_dir, f"human_{human_idx:02d}_frame_{frame_idx:04d}.ply")
+                        o3d.io.write_point_cloud(ply_path, human_pcd)
 
 def save_camera_parameters_per_frame(results, output_dir, seq_name):
     """
@@ -539,7 +541,7 @@ def save_camera_parameters_per_frame(results, output_dir, seq_name):
              intrinsics=intrinsics,    # [S, 3, 3] - Camera intrinsic matrices
              num_frames=num_frames)
 
-def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large"):
+def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large", all_humans=False):
     """
     Segment human using YOLO detection + SAM2 video segmentation
 
@@ -548,13 +550,17 @@ def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="faceboo
         human_idx: Index of the human to segment (0-based)
         yolo_ckpt: Path to YOLO checkpoint
         sam2_model: SAM2 model name
+        all_humans: Whether to detect and segment all humans
 
     Returns:
-        human_boxes: (1, num_frames, 4) in xyxy format ranging from 0 to 1
-        human_masks: (1, num_frames, H, W) boolean masks
+        human_boxes: (N, num_frames, 4) in xyxy format ranging from 0 to 1
+        human_masks: (N, num_frames, H, W) boolean masks
     """
 
-    logger.info(f"Segmenting human {human_idx} from {len(frames)} frames...")
+    if all_humans:
+        logger.info(f"Segmenting all humans from {len(frames)} frames...")
+    else:
+        logger.info(f"Segmenting human {human_idx} from {len(frames)} frames...")
 
     # Step 1: Use YOLO to detect humans in the first frame
     yolo_model = YOLO(yolo_ckpt)
@@ -582,20 +588,24 @@ def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="faceboo
                     bbox = xyxyn_boxes[i].cpu().numpy()
                     human_detections.append((confidence, bbox))
 
-    # Sort by confidence and select the human_idx-th human
+    # Sort by confidence
     human_detections.sort(key=lambda x: x[0], reverse=True)
 
-    if len(human_detections) <= human_idx:
-        raise ValueError(
-            f"Only {len(human_detections)} humans detected, but requested human_idx={human_idx}")
+    if len(human_detections) == 0:
+        raise ValueError("No humans detected in the first frame")
 
-    # [x1, y1, x2, y2] in [0,1]
-    selected_human_bbox = human_detections[human_idx][1]
-    selected_human_conf = human_detections[human_idx][0]
-
-    logger.info(
-        f"Selected human {human_idx} with confidence {selected_human_conf:.3f}")
-    logger.info(f"Initial bbox: {selected_human_bbox}")
+    # Select humans to process
+    humans_to_process = []
+    if all_humans:
+        humans_to_process = human_detections
+        logger.info(f"Processing all {len(humans_to_process)} detected humans")
+    else:
+        if len(human_detections) <= human_idx:
+            raise ValueError(
+                f"Only {len(human_detections)} humans detected, but requested human_idx={human_idx}")
+        humans_to_process = [human_detections[human_idx]]
+        logger.info(
+            f"Selected human {human_idx} with confidence {humans_to_process[0][0]:.3f}")
 
     # Release YOLO model
     del yolo_model
@@ -616,69 +626,87 @@ def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="faceboo
         inference_state = predictor.init_state(video_path=temp_dir)
         predictor.reset_state(inference_state)
 
-        # Step 4: Convert normalized bbox to pixel coordinates for SAM2
         frame_height, frame_width = frames[0].shape[:2]
-        x1, y1, x2, y2 = selected_human_bbox
-        box_pixel = [
-            x1 * frame_width,   # x_min
-            y1 * frame_height,  # y_min
-            x2 * frame_width,   # x_max
-            y2 * frame_height   # y_max
-        ]
-
-        logger.info(f"SAM2 input box (pixels): {box_pixel}")
-
-        # Step 5: Add box to SAM2 for first frame
         ann_frame_idx = 0  # First frame
-        ann_obj_id = 0     # Object ID
 
-        _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
-            inference_state=inference_state,
-            frame_idx=ann_frame_idx,
-            obj_id=ann_obj_id,
-            box=box_pixel,
-        )
+        # Map internal SAM2 obj_id to our list index
+        obj_id_to_idx = {}
+
+        # Step 4 & 5: Add boxes for all selected humans
+        for i, (conf, bbox) in enumerate(humans_to_process):
+            # [x1, y1, x2, y2] in [0,1]
+            x1, y1, x2, y2 = bbox
+            box_pixel = [
+                x1 * frame_width,   # x_min
+                y1 * frame_height,  # y_min
+                x2 * frame_width,   # x_max
+                y2 * frame_height   # y_max
+            ]
+
+            logger.info(f"SAM2 input box for human {i} (pixels): {box_pixel}")
+
+            # Using i as obj_id
+            _, out_obj_ids, out_mask_logits = predictor.add_new_points_or_box(
+                inference_state=inference_state,
+                frame_idx=ann_frame_idx,
+                obj_id=i,
+                box=box_pixel,
+            )
+            obj_id_to_idx[i] = i
 
         # Step 6: Propagate segmentation through all frames
-        masks = []
-        bboxes = []
+        # Initialize results storage
+        num_humans = len(humans_to_process)
+        all_masks = [[] for _ in range(num_humans)]
+        all_bboxes = [[] for _ in range(num_humans)]
+
+        # Current bboxes (initialized with first frame detection)
+        current_bboxes = [h[1].tolist() for h in humans_to_process]
 
         for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
-            # Get mask for our object
-            mask = (out_mask_logits[ann_obj_id] > 0.0).squeeze(0).cpu().numpy()
 
-            # Apply dilation to clean up the mask (like in segment_example.py)
-            kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-            mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=5)
-            mask = mask.astype(bool)
+            # Process each object in the current frame
+            for i, obj_id in enumerate(out_obj_ids):
+                if obj_id not in obj_id_to_idx:
+                    continue
 
-            masks.append(mask)
+                human_idx = obj_id_to_idx[obj_id]
 
-            # Calculate bbox from mask
-            if np.any(mask):
-                # Find bounding box of the mask
-                rows = np.any(mask, axis=1)
-                cols = np.any(mask, axis=0)
+                # Get mask for this object
+                # out_mask_logits is (N, H, W)
+                mask = (out_mask_logits[i] > 0.0).cpu().numpy().squeeze()
 
-                if np.any(rows) and np.any(cols):
-                    y_min, y_max = np.where(rows)[0][[0, -1]]
-                    x_min, x_max = np.where(cols)[0][[0, -1]]
+                # Apply dilation to clean up the mask
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                mask = cv2.dilate(mask.astype(np.uint8), kernel, iterations=5)
+                mask = mask.astype(bool)
 
-                    # Normalize to [0, 1]
-                    bbox = [
-                        x_min / frame_width,
-                        y_min / frame_height,
-                        x_max / frame_width,
-                        y_max / frame_height
-                    ]
+                all_masks[human_idx].append(mask)
+
+                # Calculate bbox from mask
+                if np.any(mask):
+                    # Find bounding box of the mask
+                    rows = np.any(mask, axis=1)
+                    cols = np.any(mask, axis=0)
+
+                    if np.any(rows) and np.any(cols):
+                        y_min, y_max = np.where(rows)[0][[0, -1]]
+                        x_min, x_max = np.where(cols)[0][[0, -1]]
+
+                        # Normalize to [0, 1]
+                        bbox = [
+                            x_min / frame_width,
+                            y_min / frame_height,
+                            x_max / frame_width,
+                            y_max / frame_height
+                        ]
+                        current_bboxes[human_idx] = bbox
+                    else:
+                         bbox = current_bboxes[human_idx]
                 else:
-                    # Use previous bbox if mask is empty
-                    bbox = bboxes[-1] if bboxes else selected_human_bbox.tolist()
-            else:
-                # Use previous bbox if mask is empty
-                bbox = bboxes[-1] if bboxes else selected_human_bbox.tolist()
+                    bbox = current_bboxes[human_idx]
 
-            bboxes.append(bbox)
+                all_bboxes[human_idx].append(bbox)
 
         # Release SAM2 model
         del predictor
@@ -691,10 +719,12 @@ def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="faceboo
     # Step 7: Format output
     num_frames = len(frames)
 
-    # Convert to tensors with correct shapes
-    human_boxes = torch.tensor(bboxes).unsqueeze(0)  # (1, num_frames, 4)
-    human_masks = torch.tensor(np.stack(masks)).unsqueeze(
-        0)  # (1, num_frames, H, W)
+    # Stack results
+    # all_bboxes: list of lists -> (num_humans, num_frames, 4)
+    human_boxes = torch.tensor(all_bboxes)
+
+    # all_masks: list of lists -> (num_humans, num_frames, H, W)
+    human_masks = torch.tensor(np.stack(all_masks))
 
     logger.info(f"Segmentation completed. Output shapes:")
     logger.info(f"  human_boxes: {human_boxes.shape}")
@@ -703,7 +733,7 @@ def segment_human(frames, human_idx, yolo_ckpt="yolo11n.pt", sam2_model="faceboo
     return human_boxes, human_masks
 
 
-def extract_frames(video_path, fps, human_idx, start_idx=None, end_idx=None, original_fps=30.0, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large"):
+def extract_frames(video_path, fps, human_idx, start_idx=None, end_idx=None, original_fps=30.0, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large", all_humans=False):
     """Extract frames from video or directory at specified fps
 
     Args:
@@ -715,6 +745,7 @@ def extract_frames(video_path, fps, human_idx, start_idx=None, end_idx=None, ori
         original_fps: Original fps of the image sequence (default: 30.0, used only for directory input)
         yolo_ckpt: Path to YOLO checkpoint
         sam2_model: SAM2 model name
+        all_humans: Whether to detect and segment all humans
     """
 
     if not os.path.exists(video_path):
@@ -736,11 +767,11 @@ def extract_frames(video_path, fps, human_idx, start_idx=None, end_idx=None, ori
             video_path, fps, start_idx=start_idx, end_idx=end_idx)
 
     num_frames = len(frames)
-    human_boxes, human_masks = segment_human(frames, human_idx, yolo_ckpt=yolo_ckpt, sam2_model=sam2_model)
+    human_boxes, human_masks = segment_human(frames, human_idx, yolo_ckpt=yolo_ckpt, sam2_model=sam2_model, all_humans=all_humans)
 
     # frame: (1, num_frames, 3, H, W)
-    # human_boxes: (1, num_frames, 4) in xyxy format ranging from 0 to 1
-    # human_masks: (1, num_frames, H, W)
+    # human_boxes: (N, num_frames, 4) in xyxy format ranging from 0 to 1
+    # human_masks: (N, num_frames, H, W)
     return frames, human_boxes, human_masks
 
 
@@ -905,7 +936,7 @@ def extract_frames_from_video(video_path, fps, start_idx=None, end_idx=None):
     return frames
 
 
-def process_video(video_path, fps, human_idx, target_size=518, bbox_scale=1.0, start_idx=None, end_idx=None, original_fps=30.0, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large"):
+def process_video(video_path, fps, human_idx, target_size=518, bbox_scale=1.0, start_idx=None, end_idx=None, original_fps=30.0, yolo_ckpt="yolo11n.pt", sam2_model="facebook/sam2-hiera-large", all_humans=False):
     """Process video by extracting frames at specified fps
 
     Args:
@@ -919,11 +950,12 @@ def process_video(video_path, fps, human_idx, target_size=518, bbox_scale=1.0, s
         original_fps: Original fps of the image sequence (default: 30.0, used only for directory input)
         yolo_ckpt: Path to YOLO checkpoint
         sam2_model: SAM2 model name
+        all_humans: Whether to detect and segment all humans
     """
     # Step 1: Extract frames
     frames, human_boxes, human_masks = extract_frames(
         video_path, fps, human_idx, start_idx=start_idx, end_idx=end_idx, original_fps=original_fps,
-        yolo_ckpt=yolo_ckpt, sam2_model=sam2_model)
+        yolo_ckpt=yolo_ckpt, sam2_model=sam2_model, all_humans=all_humans)
 
     # Step 3: Resize frames
     rgbs = resize_frames(frames, target_size)
@@ -951,108 +983,128 @@ def process_video(video_path, fps, human_idx, target_size=518, bbox_scale=1.0, s
 
 
 def run_inference(unish_model, data_dict, device, chunk_size=30):
-    """Run inference on the loaded scene data - processed for single human"""
+    """Run inference on the loaded scene data - processed for multiple humans"""
     seq_name = data_dict['seq_name']
     rgbs = data_dict['images'].to(device)
-    # [1, num_frames, 3, 256, 256]
+    # [N, num_frames, 3, 256, 256]
     human_patches = data_dict['human_patches'].to(device)
-    # [1, num_frames, 3]
+    # [N, num_frames, 3]
     bbox_info = data_dict['bbox_info'].to(device)
     selected_views = data_dict['selected_views']
 
     total_frames = rgbs.shape[0]
-    human_idx = 0
+    num_humans = human_patches.shape[0]
 
-    # Initialize lists to store chunk results
-    chunk_results = {
-        'depth_map': [],
-        'point_map': [],
-        'extrinsics': [],
-        'pred_intrinsics': [],
-        'depth_conf': [],
-        'pred_pose_aa': [],
-        'pred_trans_cam': [],
-        'pred_betas': [],
-    }
+    logger.info(f"Running inference for {num_humans} humans")
 
-    # Process frames in chunks
-    num_chunks = (total_frames + chunk_size -
-                  1) // chunk_size  # Ceiling division
-    for chunk_idx in range(num_chunks):
-        start_idx = chunk_idx * chunk_size
-        end_idx = min(start_idx + chunk_size, total_frames)
+    all_humans_results = []
 
-        # Extract chunk data
-        rgbs_chunk = rgbs[start_idx:end_idx]  # [chunk_frames, 3, H, W]
-        # [chunk_frames, 3, 256, 256]
-        human_patches_chunk = human_patches[human_idx, start_idx:end_idx]
-        bbox_info_chunk = bbox_info[human_idx,
-                                    start_idx:end_idx]  # [chunk_frames, 3]
+    for human_idx in range(num_humans):
+        logger.info(f"Processing human {human_idx}...")
 
-        # Add batch dimension for model input
-        rgbs_batched = rgbs_chunk.unsqueeze(
-            0)  # [1, chunk_frames, 3, H, W]
-        human_patches_single = human_patches_chunk.unsqueeze(
-            0).to(torch.bfloat16)  # [1, chunk_frames, 3, 256, 256]
-        bbox_info_single = bbox_info_chunk.unsqueeze(
-            0)  # [1, chunk_frames, 3]
-
-        input_dict = {
-            "images": rgbs_batched,
-            "human_patches": human_patches_single,
-            "bbox_info": bbox_info_single,
+        # Initialize lists to store chunk results
+        chunk_results = {
+            'depth_map': [],
+            'point_map': [],
+            'extrinsics': [],
+            'pred_intrinsics': [],
+            'depth_conf': [],
+            'pred_pose_aa': [],
+            'pred_trans_cam': [],
+            'pred_betas': [],
         }
 
-        unish_model.eval()
-        with torch.no_grad():
-            predictions = unish_model.inference(input_dict)
+        # Process frames in chunks
+        num_chunks = (total_frames + chunk_size -
+                      1) // chunk_size  # Ceiling division
+        for chunk_idx in range(num_chunks):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, total_frames)
 
-            # Store chunk predictions (remove batch dimension and move to CPU)
-            chunk_results['depth_map'].append(
-                predictions["depth_map"].squeeze(0).cpu())  # [chunk_frames, H, W, 1]
-            chunk_results['point_map'].append(
-                predictions["point_map"].squeeze(0).cpu())  # [chunk_frames, H, W, 3]
-            chunk_results['extrinsics'].append(
-                predictions["w2cs_cano"].squeeze(0).cpu())  # [chunk_frames, 4, 4]
-            chunk_results['pred_intrinsics'].append(
-                predictions["intrinsics"].squeeze(0).cpu())  # [chunk_frames, 3, 3]
-            chunk_results['depth_conf'].append(
-                predictions["point_conf"].squeeze(0).cpu())  # [chunk_frames, H, W, 1]
-            chunk_results['pred_pose_aa'].append(
-                predictions["pose_cam"].squeeze(0).cpu())  # [chunk_frames, 165]
-            chunk_results['pred_trans_cam'].append(
-                predictions["trans_cam"].squeeze(0).cpu())  # [chunk_frames, 3]
-            chunk_results['pred_betas'].append(
-                predictions["betas"].squeeze(0).cpu())  # [chunk_frames, 10]
+            # Extract chunk data
+            rgbs_chunk = rgbs[start_idx:end_idx]  # [chunk_frames, 3, H, W]
+            # [chunk_frames, 3, 256, 256]
+            human_patches_chunk = human_patches[human_idx, start_idx:end_idx]
+            bbox_info_chunk = bbox_info[human_idx,
+                                        start_idx:end_idx]  # [chunk_frames, 3]
 
-    # Concatenate all chunk results
-    human_result = {}
-    for key in chunk_results:
-        # Concatenate along frame dimension
-        human_result[key] = torch.cat(chunk_results[key], dim=0)
+            # Add batch dimension for model input
+            rgbs_batched = rgbs_chunk.unsqueeze(
+                0)  # [1, chunk_frames, 3, H, W]
+            human_patches_single = human_patches_chunk.unsqueeze(
+                0).to(torch.bfloat16)  # [1, chunk_frames, 3, 256, 256]
+            bbox_info_single = bbox_info_chunk.unsqueeze(
+                0)  # [1, chunk_frames, 3]
 
-    # Transform pred_trans_cam from camera coordinates to world coordinates
-    # Create SMPL dict for transformation
-    smpl_dict = {
-        # Add batch dimension: [1, S, 165]
-        'pose_cam': human_result['pred_pose_aa'].unsqueeze(0),
-        # Add batch dimension: [1, S, 3]
-        'trans_cam': human_result['pred_trans_cam'].unsqueeze(0),
-        # Add batch dimension: [1, S, 10]
-        'betas': human_result['pred_betas'].unsqueeze(0)
-    }
+            input_dict = {
+                "images": rgbs_batched,
+                "human_patches": human_patches_single,
+                "bbox_info": bbox_info_single,
+            }
 
-    # Transform to world coordinates using extrinsics
-    smpl_world_dict = transform_smpl(smpl_dict, human_result['extrinsics'].unsqueeze(
-        0))  # Add batch dimension to extrinsics
+            unish_model.eval()
+            with torch.no_grad():
+                predictions = unish_model.inference(input_dict)
 
-    # Extract world coordinates (remove batch dimension)
-    human_result['pred_trans_world'] = smpl_world_dict['trans_world'].squeeze(
-        0)  # [S, 3]
-    human_result['pred_pose_world_aa'] = smpl_world_dict['pose_world'].squeeze(
-        0)  # [S, 165]
+                # Store chunk predictions (remove batch dimension and move to CPU)
+                chunk_results['depth_map'].append(
+                    predictions["depth_map"].squeeze(0).cpu())  # [chunk_frames, H, W, 1]
+                chunk_results['point_map'].append(
+                    predictions["point_map"].squeeze(0).cpu())  # [chunk_frames, H, W, 3]
+                chunk_results['extrinsics'].append(
+                    predictions["w2cs_cano"].squeeze(0).cpu())  # [chunk_frames, 4, 4]
+                chunk_results['pred_intrinsics'].append(
+                    predictions["intrinsics"].squeeze(0).cpu())  # [chunk_frames, 3, 3]
+                chunk_results['depth_conf'].append(
+                    predictions["point_conf"].squeeze(0).cpu())  # [chunk_frames, H, W, 1]
+                chunk_results['pred_pose_aa'].append(
+                    predictions["pose_cam"].squeeze(0).cpu())  # [chunk_frames, 165]
+                chunk_results['pred_trans_cam'].append(
+                    predictions["trans_cam"].squeeze(0).cpu())  # [chunk_frames, 3]
+                chunk_results['pred_betas'].append(
+                    predictions["betas"].squeeze(0).cpu())  # [chunk_frames, 10]
 
-    main_result = human_result
+        # Concatenate all chunk results
+        human_result = {}
+        for key in chunk_results:
+            # Concatenate along frame dimension
+            human_result[key] = torch.cat(chunk_results[key], dim=0)
+
+        # Transform pred_trans_cam from camera coordinates to world coordinates
+        # Create SMPL dict for transformation
+        smpl_dict = {
+            # Add batch dimension: [1, S, 165]
+            'pose_cam': human_result['pred_pose_aa'].unsqueeze(0),
+            # Add batch dimension: [1, S, 3]
+            'trans_cam': human_result['pred_trans_cam'].unsqueeze(0),
+            # Add batch dimension: [1, S, 10]
+            'betas': human_result['pred_betas'].unsqueeze(0)
+        }
+
+        # Transform to world coordinates using extrinsics
+        smpl_world_dict = transform_smpl(smpl_dict, human_result['extrinsics'].unsqueeze(
+            0))  # Add batch dimension to extrinsics
+
+        # Extract world coordinates (remove batch dimension)
+        human_result['pred_trans_world'] = smpl_world_dict['trans_world'].squeeze(
+            0)  # [S, 3]
+        human_result['pred_pose_world_aa'] = smpl_world_dict['pose_world'].squeeze(
+            0)  # [S, 165]
+
+        all_humans_results.append(human_result)
+
+    # Use scene/camera from human 0 (or maybe we could fuse them, but for now take first one)
+    main_result = all_humans_results[0].copy()
+
+    # Store aggregated human data
+    main_result['num_humans'] = num_humans
+    main_result['pred_pose_world_aa_all_humans'] = [r['pred_pose_world_aa'] for r in all_humans_results]
+    main_result['pred_trans_world_all_humans'] = [r['pred_trans_world'] for r in all_humans_results]
+    main_result['pred_betas_all_humans'] = [r['pred_betas'] for r in all_humans_results]
+
+    # Store camera coordinates data for all humans (needed for visualization)
+    main_result['pred_pose_aa_all_humans'] = [r['pred_pose_aa'] for r in all_humans_results]
+    main_result['pred_trans_cam_all_humans'] = [r['pred_trans_cam'] for r in all_humans_results]
 
     # Add metadata
     main_result['seq_name'] = seq_name
@@ -1119,22 +1171,24 @@ def generate_mixed_geometries_in_memory(results, body_models_path="body_models/"
     # Get SMPL faces (same for all frames and humans)
     smpl_faces = smpl_visualizer.models['neutral'].faces.astype(np.int32)
 
-    # Get SMPL vertices and joints for single human using camera coordinates
+    # Get SMPL vertices and joints for all humans using camera coordinates
     all_human_vertices = []
-    # all_human_joints = []
-    human_idx = 0
+    num_humans = results.get('num_humans', 1)
     
-    # Single human case
-    pred_pose_cam_aa = results['pred_pose_aa']
-    pred_trans_cam = results['pred_trans_cam']
-    pred_betas = results['pred_betas']
+    for h_idx in range(num_humans):
+        if num_humans > 1 and 'pred_pose_aa_all_humans' in results:
+            pred_pose_cam_aa = results['pred_pose_aa_all_humans'][h_idx]
+            pred_trans_cam = results['pred_trans_cam_all_humans'][h_idx]
+            pred_betas = results['pred_betas_all_humans'][h_idx]
+        else:
+            pred_pose_cam_aa = results['pred_pose_aa']
+            pred_trans_cam = results['pred_trans_cam']
+            pred_betas = results['pred_betas']
 
-    # Get vertices and joints for all frames using camera coordinates
-    vertices, joints = smpl_visualizer.get_batch_vertices(
-        pred_pose_cam_aa, pred_betas, pred_trans_cam, "neutral"
-    )
-    all_human_vertices.append(vertices)
-    # all_human_joints.append(joints)
+        vertices, joints = smpl_visualizer.get_batch_vertices(
+            pred_pose_cam_aa, pred_betas, pred_trans_cam, "neutral"
+        )
+        all_human_vertices.append(vertices)
 
     # Output lists
     # scene_point_clouds = []  # Scene point clouds (one per frame)
@@ -1295,29 +1349,35 @@ def generate_mixed_geometries_in_memory(results, body_models_path="body_models/"
         # Use direct frame mapping (no upsampling)
         smpl_idx = min(i, len(all_human_vertices[0]) - 1)
 
-        # Single human
-        human_idx = 0
-        # Get SMPL vertices and joints for this frame and human - use correct mapping
-        # [num_vertices, 3]
-        frame_vertices = all_human_vertices[human_idx][smpl_idx].cpu(
-        ).numpy()
+        # Loop over all humans
+        for human_idx in range(len(all_human_vertices)):
+            # Get SMPL vertices and joints for this frame and human
+            frame_vertices = all_human_vertices[human_idx][smpl_idx].cpu().numpy()
 
-        # Create SMPL mesh
-        smpl_mesh = o3d.geometry.TriangleMesh()
-        smpl_mesh.vertices = o3d.utility.Vector3dVector(frame_vertices)
-        smpl_mesh.triangles = o3d.utility.Vector3iVector(smpl_faces)
+            # Create SMPL mesh
+            smpl_mesh = o3d.geometry.TriangleMesh()
+            smpl_mesh.vertices = o3d.utility.Vector3dVector(frame_vertices)
+            smpl_mesh.triangles = o3d.utility.Vector3iVector(smpl_faces)
 
-        # Single human: use reddish color
-        human_color = np.array([0.8, 0.2, 0.2])
+            # Different colors for different humans
+            colors_palette = [
+                [0.8, 0.2, 0.2],  # Red
+                [0.2, 0.8, 0.2],  # Green
+                [0.2, 0.2, 0.8],  # Blue
+                [0.8, 0.8, 0.2],  # Yellow
+                [0.8, 0.2, 0.8],  # Magenta
+                [0.2, 0.8, 0.8],  # Cyan
+            ]
+            human_color = np.array(colors_palette[human_idx % len(colors_palette)])
 
-        # Set vertex colors
-        vertex_colors = np.tile(human_color, (len(frame_vertices), 1))
-        smpl_mesh.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
+            # Set vertex colors
+            vertex_colors = np.tile(human_color, (len(frame_vertices), 1))
+            smpl_mesh.vertex_colors = o3d.utility.Vector3dVector(vertex_colors)
 
-        # Compute normals for better rendering
-        smpl_mesh.compute_vertex_normals()
+            # Compute normals for better rendering
+            smpl_mesh.compute_vertex_normals()
 
-        frame_smpl_meshes.append(smpl_mesh)
+            frame_smpl_meshes.append(smpl_mesh)
 
         viz_smpl_meshes.append(frame_smpl_meshes)
 
@@ -1669,9 +1729,9 @@ def run_visualization(scene_point_clouds, smpl_meshes, smpl_points_for_camera, o
                 t_cam_to_world = cam_to_world_extr[:3, 3]
 
                 # Extract human points using masks
-                # Single human processing
-                human_idx = 0
-                if human_idx < human_masks_data.shape[0]:
+                num_humans = human_masks_data.shape[0]
+
+                for human_idx in range(num_humans):
                     human_mask = human_masks_data[human_idx, i]  # [H, W]
 
                     # Resize mask if needed to match point cloud resolution
@@ -1814,11 +1874,20 @@ def run_visualization(scene_point_clouds, smpl_meshes, smpl_points_for_camera, o
             # Ensure the array is contiguous for OpenCV
             bbox_frame = np.ascontiguousarray(bbox_frame)
 
-            # Draw bounding boxes for single human (using correct indexing)
+            # Draw bounding boxes for all humans
             img_height, img_width = bbox_frame.shape[:2]
             
-            human_idx = 0
-            if human_idx < human_boxes.shape[0]:
+            colors_palette_cv = [
+                (0, 0, 255),  # Red (BGR)
+                (0, 255, 0),  # Green
+                (255, 0, 0),  # Blue
+                (0, 255, 255),  # Yellow
+                (255, 0, 255),  # Magenta
+                (255, 255, 0),  # Cyan
+            ]
+
+            num_humans = human_boxes.shape[0]
+            for human_idx in range(num_humans):
                 # Get normalized bbox: [x1, y1, x2, y2] in [0,1] range
                 x1, y1, x2, y2 = human_boxes[human_idx, i]
 
@@ -1834,8 +1903,8 @@ def run_visualization(scene_point_clouds, smpl_meshes, smpl_points_for_camera, o
                 x2_pixel = max(0, min(x2_pixel, img_width))
                 y2_pixel = max(0, min(y2_pixel, img_height))
 
-                # Choose color for each human (single color for now)
-                color = (0, 255, 0) # Green
+                # Choose color for each human
+                color = colors_palette_cv[human_idx % len(colors_palette_cv)]
 
                 # Draw bounding box
                 cv2.rectangle(bbox_frame, (x1_pixel, y1_pixel),
