@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--yolo_ckpt", type=str, default="ckpts/yolo11n.pt", help="Path to YOLO checkpoint")
     parser.add_argument("--sam2_model", type=str, default="facebook/sam2-hiera-large", help="SAM2 model name or path")
+    parser.add_argument("--all_humans", action="store_true", help="Detect and process all humans in the video")
 
     args = parser.parse_args()
 
@@ -117,7 +118,8 @@ def main():
         args.video_path, args.fps, args.human_idx, args.target_size,
         bbox_scale=args.bbox_scale, start_idx=args.start_idx, end_idx=args.end_idx, 
         original_fps=args.original_fps,
-        yolo_ckpt=args.yolo_ckpt, sam2_model=args.sam2_model
+        yolo_ckpt=args.yolo_ckpt, sam2_model=args.sam2_model,
+        all_humans=args.all_humans
     )
 
     # Run inference
